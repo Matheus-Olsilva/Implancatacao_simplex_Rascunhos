@@ -1,0 +1,106 @@
+import numpy as np
+
+def simplex_revisado(c, A, b):
+
+    c = np.array(c, dtype=float)
+    A = np.array(A, dtype=float)
+    b = np.array(b, dtype=float)
+    
+    # Dimensões do problema
+    m, n = A.shape  
+    
+    # Adicionar variáveis de folga
+    A_completa = np.hstack((A, np.identity(m)))
+    c_completo = np.hstack((c, np.zeros(m)))
+    
+    # Inicializar variáveis básicas e não-básicas
+    indices_base = list(range(n, n+m))
+    indices_naobase = list(range(n))
+    
+    # Número total de variáveis
+    n_total = n + m
+    
+    while True:
+        # Obter matrizes de base e não-base
+        B = A_completa[:, indices_base]
+        N = A_completa[:, indices_naobase]
+        
+        # Calcular a inversa da base
+        B_inv = np.linalg.inv(B)
+        
+        # Calcular solução básica primal
+        x_B = B_inv @ b
+        
+        # Obter custos de variáveis básicas e não-básicas
+        c_B = c_completo[indices_base]
+        c_N = c_completo[indices_naobase]
+        
+        # Calcular multiplicadores simplex (variáveis duais)
+        y = c_B @ B_inv
+        
+        # Calcular custos reduzidos para variáveis não-básicas
+        custos_reduzidos = c_N - y @ N
+        
+        # Verificar otimalidade
+        if np.all(custos_reduzidos <= 1e-10):
+            x_completo = np.zeros(n_total)
+            for i, idx in enumerate(indices_base):
+                x_completo[idx] = x_B[i]           
+            z = np.dot(c_completo, x_completo)           
+            return x_completo[:n], z
+        
+        # Escolher variável que entra na base
+        idx_entra = np.argmax(custos_reduzidos)
+        var_entra = indices_naobase[idx_entra]
+        
+        direcao = B_inv @ A_completa[:, var_entra]
+        
+        # Teste da razão mínima
+        razoes = []
+        for i in range(m):
+            if direcao[i] > 1e-10:
+                razao = x_B[i] / direcao[i]
+                razoes.append((razao, i))
+        
+        if not razoes:
+            return None, None
+            
+        # Selecionar a menor razão positiva
+        min_razao, idx_sai = min(razoes)
+        var_sai = indices_base[idx_sai]
+        
+        # Atualizar base e não-base
+        indices_base[idx_sai] = var_entra
+        indices_naobase[idx_entra] = var_sai
+
+def exemplo():
+    # Coeficientes da função objetivo
+    c = [3, 5]     
+
+    # Coeficientes das restrições
+    A = [
+        [1, 0],     
+        [0, 2],
+        [3, 2]
+    ]
+    # Valores do lado direito
+    b = [4, 12, 18]     
+    
+    print("Maximizar: 3x1 + 5x2")
+    print("Sujeito a:")
+    print("  x1 <= 4")
+    print("  2x2 <= 12")
+    print("  3x1 + 2x2 <= 18")
+    
+    x, z = simplex_revisado(c, A, b)
+    
+    if x is not None:
+        print("\nResultados:")
+        print(f"Valor ótimo: {z}")
+        print("Solução:")
+        for i, val in enumerate(x):
+            print(f"x{i+1} = {val}")
+
+
+if __name__ == "__main__":
+    exemplo()
