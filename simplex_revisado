@@ -354,7 +354,7 @@ def main():
     import sys
     
     if len(sys.argv) < 2:
-        print("Uso: python simplex_revisado.py arquivo_entrada.txt")
+        print("Uso: python simplex_revisado.py problema.txt")
         return
     
     caminho_arquivo = sys.argv[1]
