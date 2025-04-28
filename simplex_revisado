@@ -1,106 +1,366 @@
+import re
 import numpy as np
 
-def simplex_revisado(c, A, b):
+class SimplexRevisado:
+    def __init__(self, caminho_arquivo):
+        self.caminho_arquivo = caminho_arquivo
+        self.eh_max = True
+        self.num_variaveis = 0
+        self.num_restricoes = 0
+        self.coef_objetivo = []
+        self.restricoes_esq = []
+        self.restricoes_dir = []
+        self.tipos_restricoes = []
+        
+        # Matrizes
+        self.A = None                
+        self.b = None                
+        self.c = None                
+        self.vars_basicas = []       
+        self.vars_nao_basicas = []   
+        self.B = None                
+        self.B_inv = None            
+        self.x_B = None              
+        self.y = None                
+        
+        # Variáveis artificiais
+        self.tem_artificial = False
+        self.vars_artificiais = []
+        self.num_artificiais = 0
+        self.num_folga_excesso = 0
+        self.precos_sombra = []
 
-    c = np.array(c, dtype=float)
-    A = np.array(A, dtype=float)
-    b = np.array(b, dtype=float)
-    
-    # Dimensões do problema
-    m, n = A.shape  
-    
-    # Adicionar variáveis de folga
-    A_completa = np.hstack((A, np.identity(m)))
-    c_completo = np.hstack((c, np.zeros(m)))
-    
-    # Inicializar variáveis básicas e não-básicas
-    indices_base = list(range(n, n+m))
-    indices_naobase = list(range(n))
-    
-    # Número total de variáveis
-    n_total = n + m
-    
-    while True:
-        # Obter matrizes de base e não-base
-        B = A_completa[:, indices_base]
-        N = A_completa[:, indices_naobase]
+    def ler_arquivo(self):
+        with open(self.caminho_arquivo, 'r') as arquivo:
+            linhas = arquivo.readlines()
         
-        # Calcular a inversa da base
-        B_inv = np.linalg.inv(B)
+        # Função objetivo
+        linha_obj = linhas[0].strip()
+        if 'Max' in linha_obj:
+            self.eh_max = True
+        elif 'Min' in linha_obj:
+            self.eh_max = False
         
-        # Calcular solução básica primal
-        x_B = B_inv @ b
+        # Coeficientes da função objetivo
+        expr_obj = linha_obj.split('=')[1].strip()
+        termos = re.findall(r'([+-]?\s*\d*\.?\d*)\s*x(\d+)', expr_obj)
         
-        # Obter custos de variáveis básicas e não-básicas
-        c_B = c_completo[indices_base]
-        c_N = c_completo[indices_naobase]
+        indices_var = [int(idx) for _, idx in termos]
+        self.num_variaveis = max(indices_var)
+        self.coef_objetivo = [0] * self.num_variaveis
         
-        # Calcular multiplicadores simplex (variáveis duais)
-        y = c_B @ B_inv
+        for coef, var_idx in termos:
+            coef = coef.replace(' ', '')
+            if coef == '+' or coef == '':
+                coef = 1
+            elif coef == '-':
+                coef = -1
+            else:
+                coef = float(coef)
+            self.coef_objetivo[int(var_idx) - 1] = float(coef)
         
-        # Calcular custos reduzidos para variáveis não-básicas
-        custos_reduzidos = c_N - y @ N
-        
-        # Verificar otimalidade
-        if np.all(custos_reduzidos <= 1e-10):
-            x_completo = np.zeros(n_total)
-            for i, idx in enumerate(indices_base):
-                x_completo[idx] = x_B[i]           
-            z = np.dot(c_completo, x_completo)           
-            return x_completo[:n], z
-        
-        # Escolher variável que entra na base
-        idx_entra = np.argmax(custos_reduzidos)
-        var_entra = indices_naobase[idx_entra]
-        
-        direcao = B_inv @ A_completa[:, var_entra]
-        
-        # Teste da razão mínima
-        razoes = []
-        for i in range(m):
-            if direcao[i] > 1e-10:
-                razao = x_B[i] / direcao[i]
-                razoes.append((razao, i))
-        
-        if not razoes:
-            return None, None
+        # Restrições
+        for i in range(1, len(linhas)):
+            linha = linhas[i].strip()
+            if not linha:
+                continue
             
-        # Selecionar a menor razão positiva
-        min_razao, idx_sai = min(razoes)
-        var_sai = indices_base[idx_sai]
+            if '<=' in linha:
+                esq, dir = linha.split('<=')
+                tipo = '<='
+            elif '>=' in linha:
+                esq, dir = linha.split('>=')
+                tipo = '>='
+            elif '=' in linha and not ('>' in linha or '<' in linha):
+                esq, dir = linha.split('=')
+                tipo = '='
+            else:
+                continue
+            
+            # Lado esquerdo
+            termos = re.findall(r'([+-]?\s*\d*\.?\d*)\s*x(\d+)', esq)
+            coefs_esq = [0] * self.num_variaveis
+            
+            for coef, var_idx in termos:
+                coef = coef.replace(' ', '')
+                if coef == '+' or coef == '':
+                    coef = 1
+                elif coef == '-':
+                    coef = -1
+                else:
+                    coef = float(coef)
+                coefs_esq[int(var_idx) - 1] = float(coef)
+            
+            # Lado direito
+            val_dir = float(dir.strip())
+            
+            self.restricoes_esq.append(coefs_esq)
+            self.restricoes_dir.append(val_dir)
+            self.tipos_restricoes.append(tipo)
         
-        # Atualizar base e não-base
-        indices_base[idx_sai] = var_entra
-        indices_naobase[idx_entra] = var_sai
+        self.num_restricoes = len(self.restricoes_dir)
 
-def exemplo():
-    # Coeficientes da função objetivo
-    c = [3, 5]     
+    def forma_padrao(self):
+        # Contagem de variáveis extras
+        self.num_folga_excesso = self.num_restricoes
+        self.num_artificiais = 0
+        
+        for tipo in self.tipos_restricoes:
+            if tipo == '=' or tipo == '>=':
+                self.num_artificiais += 1
+                self.tem_artificial = True
+        
+        # Total de variáveis
+        total_vars = self.num_variaveis + self.num_folga_excesso + self.num_artificiais
+        
+        # Inicializar matrizes
+        self.A = np.zeros((self.num_restricoes, total_vars))
+        self.b = np.array(self.restricoes_dir)
+        self.c = np.zeros(total_vars)
+        
+        # Função objetivo
+        for j in range(self.num_variaveis):
+            if self.eh_max:
+                self.c[j] = self.coef_objetivo[j]
+            else:
+                self.c[j] = -self.coef_objetivo[j]
+        
+        # Matriz de restrições com variáveis auxiliares
+        indice_artificial = self.num_variaveis + self.num_folga_excesso
+        self.vars_artificiais = []
+        
+        for i in range(self.num_restricoes):
+            tipo = self.tipos_restricoes[i]
+            
+            # Coeficientes originais
+            for j in range(self.num_variaveis):
+                self.A[i, j] = self.restricoes_esq[i][j]
+            
+            # Variáveis de folga/excesso/artificiais
+            if tipo == '<=':
+                self.A[i, self.num_variaveis + i] = 1  # Folga
+            elif tipo == '>=':
+                self.A[i, self.num_variaveis + i] = -1  # Excesso
+                self.A[i, indice_artificial] = 1  # Artificial
+                self.vars_artificiais.append(indice_artificial)
+                indice_artificial += 1
+            elif tipo == '=':
+                self.A[i, indice_artificial] = 1  # Artificial
+                self.vars_artificiais.append(indice_artificial)
+                indice_artificial += 1
+        
+        # Correção para RHS negativo
+        for i in range(self.num_restricoes):
+            if self.b[i] < 0:
+                self.b[i] = -self.b[i]
+                self.A[i, :] = -self.A[i, :]
+        
+        # Inicializar base
+        self.vars_basicas = []
+        for i in range(self.num_restricoes):
+            if self.tipos_restricoes[i] == '<=':
+                self.vars_basicas.append(self.num_variaveis + i)
+            else:
+                indice = self.vars_artificiais.pop(0)
+                self.vars_basicas.append(indice)
+        
+        # Variáveis não-básicas
+        self.vars_nao_basicas = [j for j in range(total_vars) if j not in self.vars_basicas]
+        
+        # Matriz de base e sua inversa
+        self.B = self.A[:, self.vars_basicas]
+        self.B_inv = np.linalg.inv(self.B)
 
-    # Coeficientes das restrições
-    A = [
-        [1, 0],     
-        [0, 2],
-        [3, 2]
-    ]
-    # Valores do lado direito
-    b = [4, 12, 18]     
+    def fase_um(self):
+        if not self.tem_artificial:
+            return True
+        
+        # Salvar vetor de custo original
+        c_original = self.c.copy()
+        
+        # Função objetivo da Fase I
+        self.c = np.zeros_like(self.c)
+        for j in range(self.c.shape[0]):
+            if j >= self.num_variaveis + self.num_folga_excesso:
+                self.c[j] = -1  
+        
+        # Resolver problema auxiliar
+        if not self.simplex_revisado():
+            return False
+        
+        # Verificar variáveis artificiais
+        for i, var in enumerate(self.vars_basicas):
+            if var >= self.num_variaveis + self.num_folga_excesso and self.x_B[i] > 1e-6:
+                return False
+        
+        # Remover artificiais da base
+        for i in range(len(self.vars_basicas)):
+            if self.vars_basicas[i] >= self.num_variaveis + self.num_folga_excesso:
+                for j in self.vars_nao_basicas:
+                    if j < self.num_variaveis + self.num_folga_excesso:
+                        a_j = self.A[:, j]
+                        d = self.B_inv @ a_j
+                        
+                        if abs(d[i]) > 1e-6:
+                            # Troca de base
+                            theta = self.x_B[i] / d[i]
+                            self.x_B = self.x_B - theta * d
+                            self.x_B[i] = theta
+                            
+                            # Atualizar inversa
+                            E = np.eye(len(self.vars_basicas))
+                            E[:, i] = -d / d[i]
+                            E[i, i] = 1 / d[i]
+                            self.B_inv = E @ self.B_inv
+                            
+                            # Atualizar variáveis
+                            var_saida = self.vars_basicas[i]
+                            self.vars_basicas[i] = j
+                            self.vars_nao_basicas.remove(j)
+                            self.vars_nao_basicas.append(var_saida)
+                            break
+        
+        # Restaurar função objetivo original
+        self.c = c_original
+        self.B = self.A[:, self.vars_basicas]
+        
+        return True
+
+    def simplex_revisado(self):
+        # Solução básica inicial
+        self.x_B = self.B_inv @ self.b
+        
+        for iteracao in range(100): 
+            # Passo 1: Variáveis duais
+            c_B = self.c[self.vars_basicas]
+            self.y = c_B @ self.B_inv
+            
+            # Passo 2: Custos reduzidos
+            var_entrada = -1
+            custo_max = 1e-10
+            
+            for k, j in enumerate(self.vars_nao_basicas):
+                a_j = self.A[:, j]
+                custo_reduzido = self.c[j] - self.y @ a_j
+                
+                if custo_reduzido > custo_max:
+                    custo_max = custo_reduzido
+                    var_entrada = j
+            
+            # Verificar otimalidade
+            if custo_max <= 1e-10:
+                break
+            
+            # Passo 3: Direção simplex
+            a_q = self.A[:, var_entrada]
+            d = self.B_inv @ a_q
+            
+            # Verificar ilimitabilidade
+            if all(d_i <= 1e-10 for d_i in d):
+                return False
+            
+            # Passo 4: Teste da razão
+            theta = float('inf')
+            indice_saida = -1
+            
+            for i in range(len(self.x_B)):
+                if d[i] > 1e-10:
+                    razao = self.x_B[i] / d[i]
+                    if razao < theta:
+                        theta = razao
+                        indice_saida = i
+            
+            if indice_saida == -1:
+                return False
+            
+            var_saida = self.vars_basicas[indice_saida]
+            
+            # Passo 5: Atualizar solução
+            self.x_B = self.x_B - theta * d
+            self.x_B[indice_saida] = theta
+            
+            # Passo 6: Atualizar inversa
+            E = np.eye(len(self.vars_basicas))
+            E[:, indice_saida] = -d / d[indice_saida]
+            E[indice_saida, indice_saida] = 1 / d[indice_saida]
+            self.B_inv = E @ self.B_inv
+            
+            # Passo 7: Atualizar conjuntos de variáveis
+            self.vars_basicas[indice_saida] = var_entrada
+            self.vars_nao_basicas.remove(var_entrada)
+            self.vars_nao_basicas.append(var_saida)
+            self.B = self.A[:, self.vars_basicas]
+        
+        # Preços sombra
+        self.precos_sombra = self.y
+        if not self.eh_max:
+            self.precos_sombra = -self.y
+        
+        return True
+
+    def solucao_primal(self):
+        solucao = np.zeros(self.num_variaveis)
+        
+        for i, var in enumerate(self.vars_basicas):
+            if var < self.num_variaveis:
+                solucao[var] = self.x_B[i]
+        
+        # Valor da função objetivo
+        valor_obj = 0
+        for i, var in enumerate(self.vars_basicas):
+            if var < self.num_variaveis:
+                if self.eh_max:
+                    valor_obj += self.coef_objetivo[var] * self.x_B[i]
+                else:
+                    valor_obj -= self.coef_objetivo[var] * self.x_B[i]
+        
+        return solucao, valor_obj
     
-    print("Maximizar: 3x1 + 5x2")
-    print("Sujeito a:")
-    print("  x1 <= 4")
-    print("  2x2 <= 12")
-    print("  3x1 + 2x2 <= 18")
+    def solucao_dual(self):
+        return self.precos_sombra
     
-    x, z = simplex_revisado(c, A, b)
+    def executar(self):
+        # Passos iniciais
+        self.ler_arquivo()
+        self.forma_padrao()
+        
+        # Fase I
+        if not self.fase_um():
+            print("O problema não tem solução viável.")
+            return
+        
+        # Fase II
+        if self.simplex_revisado():
+            # Soluções
+            solucao_primal, valor_obj = self.solucao_primal()
+            solucao_dual = self.solucao_dual()
+            
+            # Resultados
+            print("\n==== SOLUÇÃO PRIMAL ====")
+            print(f"Valor Ótimo: {valor_obj}")
+            print("Variáveis:")
+            for i, val in enumerate(solucao_primal):
+                print(f"  x{i+1} = {val}")
+            
+            print("\n==== SOLUÇÃO DUAL (PREÇOS SOMBRA) ====")
+            for i, val in enumerate(solucao_dual):
+                print(f"  Restrição {i+1}: {val}")
+        else:
+            print("O problema é ilimitado.")
+
+
+# Função principal
+def main():
+    import sys
     
-    if x is not None:
-        print("\nResultados:")
-        print(f"Valor ótimo: {z}")
-        print("Solução:")
-        for i, val in enumerate(x):
-            print(f"x{i+1} = {val}")
+    if len(sys.argv) < 2:
+        print("Uso: python simplex_revisado.py arquivo_entrada.txt")
+        return
+    
+    caminho_arquivo = sys.argv[1]
+    solver = SimplexRevisado(caminho_arquivo)
+    solver.executar()
 
 
 if __name__ == "__main__":
-    exemplo()
+    main()
