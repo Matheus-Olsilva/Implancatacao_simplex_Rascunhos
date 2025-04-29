@@ -12,16 +12,16 @@ class SimplexRevisado:
         self.restricoes_dir = []
         self.tipos_restricoes = []
         
-        # Matrizes
-        self.A = None                
-        self.b = None                
-        self.c = None                
-        self.vars_basicas = []       
-        self.vars_nao_basicas = []   
-        self.B = None                
-        self.B_inv = None            
-        self.x_B = None              
-        self.y = None                
+        # Matrizes do Simplex Revisado
+        self.A = None                # Matriz de coeficientes
+        self.b = None                # Termos independentes
+        self.c = None                # Coeficientes objetivo
+        self.vars_basicas = []       # Variáveis básicas
+        self.vars_nao_basicas = []   # Variáveis não básicas
+        self.B = None                # Matriz de base
+        self.B_inv = None            # Inversa da base
+        self.x_B = None              # Solução básica
+        self.y = None                # Variáveis duais
         
         # Variáveis artificiais
         self.tem_artificial = False
@@ -47,7 +47,7 @@ class SimplexRevisado:
         
         indices_var = [int(idx) for _, idx in termos]
         self.num_variaveis = max(indices_var)
-        self.coef_objetivo = [0] * self.num_variaveis
+        self.coef_objetivo = np.zeros(self.num_variaveis)
         
         for coef, var_idx in termos:
             coef = coef.replace(' ', '')
@@ -79,7 +79,7 @@ class SimplexRevisado:
             
             # Lado esquerdo
             termos = re.findall(r'([+-]?\s*\d*\.?\d*)\s*x(\d+)', esq)
-            coefs_esq = [0] * self.num_variaveis
+            coefs_esq = np.zeros(self.num_variaveis)
             
             for coef, var_idx in termos:
                 coef = coef.replace(' ', '')
@@ -172,6 +172,7 @@ class SimplexRevisado:
         self.B_inv = np.linalg.inv(self.B)
 
     def fase_um(self):
+        # Implementa-se a Fase I para encontrar uma base viável inicial.
         if not self.tem_artificial:
             return True
         
@@ -182,15 +183,17 @@ class SimplexRevisado:
         self.c = np.zeros_like(self.c)
         for j in range(self.c.shape[0]):
             if j >= self.num_variaveis + self.num_folga_excesso:
-                self.c[j] = -1  
+                self.c[j] = -1  # Minimizar artificiais
         
         # Resolver problema auxiliar
         if not self.simplex_revisado():
+            print("Fase I falhou: problema sem solução viável.")
             return False
         
         # Verificar variáveis artificiais
         for i, var in enumerate(self.vars_basicas):
             if var >= self.num_variaveis + self.num_folga_excesso and self.x_B[i] > 1e-6:
+                print("Problema sem solução viável.")
                 return False
         
         # Remover artificiais da base
@@ -227,10 +230,11 @@ class SimplexRevisado:
         return True
 
     def simplex_revisado(self):
+        # Implementa-se o método Simplex Revisado.
         # Solução básica inicial
         self.x_B = self.B_inv @ self.b
         
-        for iteracao in range(100): 
+        for iteracao in range(100):  # Limite de iterações
             # Passo 1: Variáveis duais
             c_B = self.c[self.vars_basicas]
             self.y = c_B @ self.B_inv
@@ -257,6 +261,7 @@ class SimplexRevisado:
             
             # Verificar ilimitabilidade
             if all(d_i <= 1e-10 for d_i in d):
+                print("Problema ilimitado.")
                 return False
             
             # Passo 4: Teste da razão
@@ -271,6 +276,7 @@ class SimplexRevisado:
                         indice_saida = i
             
             if indice_saida == -1:
+                print("Erro ao determinar variável de saída.")
                 return False
             
             var_saida = self.vars_basicas[indice_saida]
@@ -299,6 +305,7 @@ class SimplexRevisado:
         return True
 
     def solucao_primal(self):
+        # Obtém-se a solução primal a partir da solução básica final.
         solucao = np.zeros(self.num_variaveis)
         
         for i, var in enumerate(self.vars_basicas):
@@ -317,11 +324,136 @@ class SimplexRevisado:
         return solucao, valor_obj
     
     def solucao_dual(self):
+        # Obtém-se a solução dual.
         return self.precos_sombra
     
+    def imprimir_problema_primal(self):
+        # Imprime-se o problema primal original
+        print("\n==== PROBLEMA PRIMAL ====")
+        
+        # Função objetivo
+        objetivo = "Maximizar" if self.eh_max else "Minimizar"
+        func_obj = f"{objetivo} Z = "
+        
+        termos = []
+        for i, coef in enumerate(self.coef_objetivo):
+            if coef != 0:
+                if coef == 1:
+                    termos.append(f"x{i+1}")
+                elif coef == -1:
+                    termos.append(f"-x{i+1}")
+                else:
+                    termos.append(f"{coef}x{i+1}")
+        
+        func_obj += " + ".join(termos).replace("+ -", "- ")
+        print(func_obj)
+        
+        # Restrições
+        print("Sujeito a:")
+        for i in range(self.num_restricoes):
+            restricao = ""
+            termos = []
+            
+            for j, coef in enumerate(self.restricoes_esq[i]):
+                if coef != 0:
+                    if coef == 1:
+                        termos.append(f"x{j+1}")
+                    elif coef == -1:
+                        termos.append(f"-x{j+1}")
+                    else:
+                        termos.append(f"{coef}x{j+1}")
+            
+            restricao += " + ".join(termos).replace("+ -", "- ")
+            restricao += f" {self.tipos_restricoes[i]} {self.restricoes_dir[i]}"
+            print(restricao)
+        
+        # Não-negatividade
+        print("x_j >= 0 para todo j")
+    
+    def imprimir_problema_dual(self):
+        # Constrói-se e imprime-se o problema dual
+        print("\n==== PROBLEMA DUAL ====")
+        
+        # O tipo do problema dual é o oposto do primal
+        objetivo_dual = "Minimizar" if self.eh_max else "Maximizar"
+        
+        # Função objetivo do dual
+        func_obj_dual = f"{objetivo_dual} W = "
+        termos_dual = []
+        
+        for i, b_i in enumerate(self.restricoes_dir):
+            if b_i != 0:
+                if b_i == 1:
+                    termos_dual.append(f"y{i+1}")
+                elif b_i == -1:
+                    termos_dual.append(f"-y{i+1}")
+                else:
+                    termos_dual.append(f"{b_i}y{i+1}")
+        
+        func_obj_dual += " + ".join(termos_dual).replace("+ -", "- ")
+        print(func_obj_dual)
+        
+        # Restrições do dual
+        print("Sujeito a:")
+        
+        for j in range(self.num_variaveis):
+            restricao_dual = ""
+            termos_dual = []
+            
+            for i in range(self.num_restricoes):
+                coef = self.restricoes_esq[i][j]
+                if coef != 0:
+                    if coef == 1:
+                        termos_dual.append(f"y{i+1}")
+                    elif coef == -1:
+                        termos_dual.append(f"-y{i+1}")
+                    else:
+                        termos_dual.append(f"{coef}y{i+1}")
+            
+            restricao_dual += " + ".join(termos_dual).replace("+ -", "- ")
+            
+            # Tipo da restrição dual depende do problema primal
+            if self.eh_max:
+                # Primal max => Dual min
+                restricao_dual += f" >= {self.coef_objetivo[j]}"
+            else:
+                # Primal min => Dual max
+                restricao_dual += f" <= {self.coef_objetivo[j]}"
+            
+            print(restricao_dual)
+        
+        # Sinal das variáveis duais
+        print("\nSinal das variáveis duais:")
+        for i in range(self.num_restricoes):
+            tipo_restricao = self.tipos_restricoes[i]
+            
+            if self.eh_max:
+                # Primal max => Dual min
+                if tipo_restricao == "<=":
+                    print(f"y{i+1} >= 0")
+                elif tipo_restricao == ">=":
+                    print(f"y{i+1} <= 0")
+                else:  # '='
+                    print(f"y{i+1} livre")
+            else:
+                # Primal min => Dual max
+                if tipo_restricao == "<=":
+                    print(f"y{i+1} <= 0")
+                elif tipo_restricao == ">=":
+                    print(f"y{i+1} >= 0")
+                else:  # '='
+                    print(f"y{i+1} livre")
+    
     def executar(self):
+        # Executa-se o Simplex Revisado completo.
         # Passos iniciais
         self.ler_arquivo()
+        
+        # Imprimir problema primal e dual
+        self.imprimir_problema_primal()
+        self.imprimir_problema_dual()
+        
+        # Preparar para resolução
         self.forma_padrao()
         
         # Fase I
@@ -344,7 +476,21 @@ class SimplexRevisado:
             
             print("\n==== SOLUÇÃO DUAL (PREÇOS SOMBRA) ====")
             for i, val in enumerate(solucao_dual):
-                print(f"  Restrição {i+1}: {val}")
+                # Verificar o sinal de acordo com a tabela
+                sinal_ajustado = val
+                tipo_restricao = self.tipos_restricoes[i]
+                
+                if self.eh_max:
+                    # Para problema primal de maximização
+                    if tipo_restricao == ">=":
+                        sinal_ajustado = -val  # Inverter sinal para restrição >=
+                    
+                else:
+                    # Para problema primal de minimização
+                    if tipo_restricao == "<=":
+                        sinal_ajustado = -val  # Inverter sinal para restrição <=
+                
+                print(f"  y{i+1} = {sinal_ajustado}")
         else:
             print("O problema é ilimitado.")
 
@@ -354,7 +500,7 @@ def main():
     import sys
     
     if len(sys.argv) < 2:
-        print("Uso: python simplex_revisado.py problema.txt")
+        print("Uso: python simplex_revisado.py arquivo_entrada.txt")
         return
     
     caminho_arquivo = sys.argv[1]
