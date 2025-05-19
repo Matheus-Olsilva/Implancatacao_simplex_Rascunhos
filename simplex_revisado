@@ -192,8 +192,6 @@ def forma_padrao():
     print(B)
     print("\nVetor c (coeficientes da função objetivo):")
     print(c)
-    print("\nMatriz B_inv (inversa da base):")
-    print(B_inv)
 
 def simplex_revisado():
     global x_B, y, vars_basicas, vars_nao_basicas, B, B_inv, num_iteracoes, precos_sombra
@@ -201,9 +199,10 @@ def simplex_revisado():
     # Solução básica inicial
     x_B = B_inv @ b
     
+    # Reiniciar contador de iterações
     iteracoes = 0
     
-    for iteracao in range(100):  
+    for iteracao in range(100):  # Limite de iterações
         iteracoes += 1
         
         # Passo 1: Variáveis duais
@@ -244,12 +243,7 @@ def simplex_revisado():
                 razao = x_B[i] / d[i]
                 if razao < theta:
                     theta = razao
-                    indice_saida = i
-        
-        if indice_saida == -1:
-            print("Erro ao determinar variável de saída.")
-            return False
-        
+                    indice_saida = i       
         var_saida = vars_basicas[indice_saida]
         
         # Passo 5: Atualizar solução
@@ -301,7 +295,7 @@ def fase_um():
     
     # Registrar iterações da fase I
     num_iteracoes_fase1 = num_iteracoes
-    num_iteracoes = 0  
+    num_iteracoes = 0  # Zerar para contar a fase II separadamente
     
     # Verificar variáveis artificiais
     for i, var in enumerate(vars_basicas):
@@ -362,144 +356,6 @@ def solucao_primal():
 
 def solucao_dual():
     return precos_sombra
-
-def calcular_ranges_recursos():
-    if B_inv is None or x_B is None:
-        print("Erro: Execute o Simplex antes de calcular os ranges.")
-        return None, None
-    
-    num_restricoes = len(b)
-    limites_inferiores = np.full(num_restricoes, -np.inf)
-    limites_superiores = np.full(num_restricoes, np.inf)
-    
-    # Para cada recurso, calcular o intervalo de variação
-    for k in range(num_restricoes):
-        # Criar o vetor unitário e_k (1 na posição k, 0 nas demais)
-        e_k = np.zeros(num_restricoes)
-        e_k[k] = 1
-        
-        # Direção de mudança na solução básica quando o recurso k muda
-        delta_xB = B_inv @ e_k
-        
-        # Calcular limites para manter a viabilidade (x_B >= 0)
-        for i in range(len(x_B)):
-            if abs(delta_xB[i]) < 1e-10:
-                continue  # Esta variável básica não é afetada por mudanças em b_k
-            
-            if delta_xB[i] > 0:
-                # Limite superior para b_k
-                max_delta = np.inf
-                for j, var_nao_basica in enumerate(vars_nao_basicas):
-                    a_j = A[:, j]
-                    delta_j = B_inv @ a_j
-                    
-                    custo_reduzido = c[var_nao_basica] - y @ a_j
-                    
-                    if abs(custo_reduzido) < 1e-10 and delta_j[i] < 0:
-                        razao = -x_B[i] / delta_j[i]
-                        if razao < max_delta:
-                            max_delta = razao
-                
-                b_k_sup = b[k] + max_delta
-                limites_superiores[k] = min(limites_superiores[k], b_k_sup)
-            else:  # delta_xB[i] < 0
-                # Limite inferior para b_k
-                min_delta = -x_B[i] / delta_xB[i]
-                b_k_inf = b[k] - min_delta
-                limites_inferiores[k] = max(limites_inferiores[k], b_k_inf)
-    
-    return limites_inferiores, limites_superiores
-
-def imprimir_ranges_recursos():
-    limites_inferiores, limites_superiores = calcular_ranges_recursos()
-    
-    if limites_inferiores is None or limites_superiores is None:
-        return
-    
-    print("\n==== ANÁLISE DE SENSIBILIDADE: RANGES DOS RECURSOS ====")
-        
-    for i in range(len(b)):
-        inf = "-∞" if limites_inferiores[i] == -np.inf else f"{limites_inferiores[i]:.4f}"
-        sup = "∞" if limites_superiores[i] == np.inf else f"{limites_superiores[i]:.4f}"
-        
-        print(f"Recurso b{i+1} (valor atual: {b[i]:.4f}):")
-        print(f"  Limite Inferior: {inf}")
-        print(f"  Limite Superior: {sup}")
-        print(f"  Intervalo: [{inf}, {sup}]")
-
-def calcular_ranges_coeficientes():
-    
-    if B_inv is None or x_B is None:
-        print("Erro: Execute o Simplex antes de calcular os ranges dos coeficientes.")
-        return None, None
-    
-    limites_inferiores = np.full(num_variaveis, -np.inf)
-    limites_superiores = np.full(num_variaveis, np.inf)
-    
-    # Para variáveis básicas
-    for i, var_basica in enumerate(vars_basicas):
-        if var_basica < num_variaveis:
-            # Calcular o vetor unitário da base
-            e_i = np.zeros(len(vars_basicas))
-            e_i[i] = 1
-            
-            # Calcular o vetor dual correspondente
-            dual_i = e_i @ B_inv
-            
-            # Calcular limites para manter otimalidade
-            for j, var_nao_basica in enumerate(vars_nao_basicas):
-                if var_nao_basica < num_variaveis:
-                    a_j = A[:, var_nao_basica]
-                    valor_dual = dual_i @ a_j
-                    
-                    if abs(valor_dual) > 1e-10:
-                        c_j = c[var_nao_basica]
-                        custo_reduzido = c_j - y @ a_j
-                        
-                        # Variação no coeficiente da função objetivo
-                        delta_c = custo_reduzido / valor_dual
-                        
-                        if valor_dual > 0:
-                            limites_superiores[var_basica] = min(limites_superiores[var_basica], 
-                                                               coef_objetivo[var_basica] + delta_c)
-                        else:
-                            limites_inferiores[var_basica] = max(limites_inferiores[var_basica],
-                                                               coef_objetivo[var_basica] + delta_c)
-    
-    # Para variáveis não-básicas
-    for j, var_nao_basica in enumerate(vars_nao_basicas):
-        if var_nao_basica < num_variaveis:
-            a_j = A[:, var_nao_basica]
-            custo_reduzido = c[var_nao_basica] - y @ a_j
-            
-            if eh_max:
-                # Para problemas de maximização
-                limites_inferiores[var_nao_basica] = -np.inf
-                limites_superiores[var_nao_basica] = coef_objetivo[var_nao_basica] + custo_reduzido
-            else:
-                # Para problemas de minimização
-                limites_inferiores[var_nao_basica] = coef_objetivo[var_nao_basica] - custo_reduzido
-                limites_superiores[var_nao_basica] = np.inf
-    
-    return limites_inferiores, limites_superiores
-
-def imprimir_ranges_coeficientes():
-    
-    limites_inferiores, limites_superiores = calcular_ranges_coeficientes()
-    
-    if limites_inferiores is None or limites_superiores is None:
-        return
-    
-    print("\n==== ANÁLISE DE SENSIBILIDADE: RANGES DOS COEFICIENTES ====")
-    
-    for i in range(num_variaveis):
-        inf = "-∞" if limites_inferiores[i] == -np.inf else f"{limites_inferiores[i]:.4f}"
-        sup = "∞" if limites_superiores[i] == np.inf else f"{limites_superiores[i]:.4f}"
-        
-        print(f"Coeficiente c{i+1} (valor atual: {coef_objetivo[i]:.4f}):")
-        print(f"  Limite Inferior: {inf}")
-        print(f"  Limite Superior: {sup}")
-        print(f"  Intervalo: [{inf}, {sup}]")
 
 def imprimir_problema_primal():
     print("\n==== PROBLEMA PRIMAL ====")
@@ -584,6 +440,7 @@ def imprimir_problema_dual():
         
         restricao_dual += " + ".join(termos_dual).replace("+ -", "- ")
         
+        # Tipo da restrição dual depende do problema primal
         if eh_max:
             # Primal max => Dual min
             restricao_dual += f" >= {coef_objetivo[j]}"
@@ -592,9 +449,8 @@ def imprimir_problema_dual():
             restricao_dual += f" <= {coef_objetivo[j]}"
         
         print(restricao_dual)
-        
-# execução
 
+# Código principal direto (sem definir uma função main)
 if len(sys.argv) < 2:
     print("Uso: python simplex_revisado.py arquivo_entrada.txt")
 else:
@@ -617,15 +473,10 @@ else:
             print(f"Valor Ótimo: {valor_obj}")
             print("Variáveis:")
             for i, val in enumerate(solucao_primal_val):
-                if abs(val) < 1e-10:
-                    val = 0.0
                 print(f"  x{i+1} = {val}")
             
             print("\n==== SOLUÇÃO DUAL (PREÇOS SOMBRA) ====")
             for i, val in enumerate(solucao_dual_val):
-                if abs(val) < 1e-10:
-                    val = 0.0
-                
                 # Verificar o sinal de acordo com a tabela
                 sinal_ajustado = val
                 tipo_restricao = tipos_restricoes[i]
@@ -641,10 +492,6 @@ else:
                         sinal_ajustado = -val  # Inverter sinal para restrição <=
                 
                 print(f"  y{i+1} = {sinal_ajustado}")
-            
-            # Análise de sensibilidade
-            imprimir_ranges_recursos()
-            imprimir_ranges_coeficientes()
             
             # Estatísticas
             print("\n==== ESTATÍSTICAS ====")
